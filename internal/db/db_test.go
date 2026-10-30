@@ -12,8 +12,16 @@ func TestMain(m *testing.M) {
 
 	exitCode := m.Run()
 
-	if err := os.Remove(db.NSF_DB_PATH); err != nil {
+	// 清除 bbolt 測試檔案
+	if err := os.Remove(db.NSF_DB_PATH); err != nil && !os.IsNotExist(err) {
 		fmt.Printf("Failed to remove test DB file: %v\n", err)
+		exitCode = 1
+	}
+
+	// 清除自訂 JSON 資料庫的測試檔案
+	customPath := db.NSF_DB_PATH + ".json"
+	if err := os.Remove(customPath); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("Failed to remove custom test DB file: %v\n", err)
 		exitCode = 1
 	}
 
@@ -46,6 +54,7 @@ var dbInstance db.DbIf
 
 func TestDb(t *testing.T) {
 	t.Run("Bbolt DB", testBboltDb)
+	t.Run("Custom DB", testCustomDb)
 }
 
 func testBboltDb(t *testing.T) {
@@ -161,5 +170,47 @@ func testMultipleDataOperations(t *testing.T) {
 		} else if exist {
 			t.Errorf("Data for %s still exists after removing all data", tc.name)
 		}
+	}
+}
+
+func TestCustomDbPersistence(t *testing.T) {
+	originalPath := db.NSF_DB_PATH
+	db.NSF_DB_PATH = t.TempDir() + "/persistence.db"
+	defer func() {
+		db.NSF_DB_PATH = originalPath
+	}()
+
+	// 第一次開啟，寫入資料。
+	first, err := db.NewDb("custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := first.Save("service1", "NF1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := first.Release(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 建立另一個資料庫物件，從同一個檔案讀取。
+	second, err := db.NewDb("custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := second.Release(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	value, err := second.Load("service1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if value != "NF1" {
+		t.Fatalf("expected NF1, got %q", value)
 	}
 }
